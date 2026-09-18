@@ -4,6 +4,7 @@
   "logsChannelId": "1533710523202273362",
   "panelChannelId": "1530787441588572351",
   "adminRoles": [],
+  "exemptUsers": [],
   "panelTitle": "🛡️ مرحباً بك في نظام تسجيل الحضور لأعضاء العصابة!",
   "panelDescription": "استخدم الأزرار أدناه لإدارة حضورك",
   "panelFields": {

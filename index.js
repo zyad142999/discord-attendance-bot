@@ -8,18 +8,55 @@ const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), '
 
 // تحميل البيانات
 let attendanceData = {};
+let hoursData = {};
 const dataPath = path.join(__dirname, 'attendance.json');
+const hoursPath = path.join(__dirname, 'hours.json');
 
 // تحميل البيانات من الملف
 function loadData() {
   if (fs.existsSync(dataPath)) {
     attendanceData = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
   }
+  if (fs.existsSync(hoursPath)) {
+    hoursData = JSON.parse(fs.readFileSync(hoursPath, 'utf8'));
+  }
 }
 
 // حفظ البيانات في الملف
 function saveData() {
   fs.writeFileSync(dataPath, JSON.stringify(attendanceData, null, 2));
+}
+
+// حفظ بيانات الساعات
+function saveHoursData() {
+  fs.writeFileSync(hoursPath, JSON.stringify(hoursData, null, 2));
+}
+
+// دالة للحصول على بداية الأسبوع
+function getWeekStart() {
+  const now = new Date();
+  const day = now.getDay();
+  const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+  const weekStart = new Date(now.setDate(diff));
+  weekStart.setHours(0, 0, 0, 0);
+  return weekStart;
+}
+
+// دالة لحساب الساعات في الأسبوع الحالي
+function getWeeklyHours(userId) {
+  if (!hoursData[userId]) return 0;
+
+  const weekStart = getWeekStart();
+  let weeklyHours = 0;
+
+  hoursData[userId].sessions.forEach(session => {
+    const sessionDate = new Date(session.date);
+    if (sessionDate >= weekStart) {
+      weeklyHours += session.hours;
+    }
+  });
+
+  return weeklyHours;
 }
 
 // إنشاء العميل
@@ -48,7 +85,47 @@ const commands = [
     .setDescription('عرض لوحة التحكم'),
   new SlashCommandBuilder()
     .setName('list')
-    .setDescription('عرض قائمة الحضور')
+    .setDescription('عرض قائمة الحضور'),
+  new SlashCommandBuilder()
+    .setName('totalhours')
+    .setDescription('عرض إجمالي ساعات الجميع'),
+  new SlashCommandBuilder()
+    .setName('exempt')
+    .setDescription('استثناء شخص من الطرد التلقائي')
+    .addUserOption(option =>
+      option.setName('user')
+        .setDescription('المستخدم المراد استثناؤه')
+        .setRequired(true)
+    ),
+  new SlashCommandBuilder()
+    .setName('addhours')
+    .setDescription('إضافة ساعات لشخص')
+    .addUserOption(option =>
+      option.setName('user')
+        .setDescription('المستخدم')
+        .setRequired(true)
+    )
+    .addIntegerOption(option =>
+      option.setName('hours')
+        .setDescription('عدد الساعات')
+        .setRequired(true)
+    ),
+  new SlashCommandBuilder()
+    .setName('increasehours')
+    .setDescription('زيادة ساعات شخص')
+    .addUserOption(option =>
+      option.setName('user')
+        .setDescription('المستخدم')
+        .setRequired(true)
+    )
+    .addIntegerOption(option =>
+      option.setName('hours')
+        .setDescription('عدد الساعات المراد زيادتها')
+        .setRequired(true)
+    ),
+  new SlashCommandBuilder()
+    .setName('weeklyhours')
+    .setDescription('عرض ساعات الأسبوع للجميع')
 ].map(command => command.toJSON());
 
 // تسجيل الأوامر
@@ -209,6 +286,16 @@ client.on('interactionCreate', async interaction => {
       };
       saveData();
 
+      // تسجيل بداية الجلسة للساعات
+      if (!hoursData[userId]) {
+        hoursData[userId] = {
+          totalHours: 0,
+          sessions: []
+        };
+      }
+      hoursData[userId].currentSessionStart = Date.now();
+      saveHoursData();
+
       await interaction.reply({
         content: config.loginSuccessMessage,
         ephemeral: true
@@ -242,6 +329,18 @@ client.on('interactionCreate', async interaction => {
       const sessionDuration = Date.now() - attendanceData[userId].loginTime;
       const hours = Math.floor(sessionDuration / (1000 * 60 * 60));
       const minutes = Math.floor((sessionDuration % (1000 * 60 * 60)) / (1000 * 60));
+
+      // حفظ الساعات من هذه الجلسة
+      if (hoursData[userId] && hoursData[userId].currentSessionStart) {
+        const sessionHours = (Date.now() - hoursData[userId].currentSessionStart) / (1000 * 60 * 60);
+        hoursData[userId].totalHours += sessionHours;
+        hoursData[userId].sessions.push({
+          date: new Date().toISOString(),
+          hours: sessionHours
+        });
+        delete hoursData[userId].currentSessionStart;
+        saveHoursData();
+      }
 
       attendanceData[userId] = {
         loggedIn: false,
@@ -386,6 +485,136 @@ client.on('interactionCreate', async interaction => {
       ephemeral: true
     });
   }
+
+  if (commandName === 'totalhours') {
+    let totalHoursList = '';
+    let totalAllHours = 0;
+
+    Object.keys(hoursData).forEach(userId => {
+      const userHours = hoursData[userId].totalHours || 0;
+      totalAllHours += userHours;
+      totalHoursList += `<@${userId}>: ${userHours.toFixed(2)} ساعة\n`;
+    });
+
+    if (totalHoursList === '') {
+      totalHoursList = 'لا توجد بيانات ساعات متاحة';
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor('#00bfff')
+      .setTitle('📊 إجمالي ساعات الجميع')
+      .setDescription(totalHoursList)
+      .addFields({ name: 'إجمالي ساعات الجميع', value: `${totalAllHours.toFixed(2)} ساعة`, inline: false })
+      .setTimestamp();
+
+    await interaction.reply({
+      embeds: [embed],
+      ephemeral: false
+    });
+  }
+
+  if (commandName === 'exempt') {
+    const targetUser = interaction.options.getUser('user');
+    const userId = targetUser.id;
+
+    if (config.exemptUsers.includes(userId)) {
+      // إزالة الاستثناء
+      config.exemptUsers = config.exemptUsers.filter(id => id !== userId);
+      fs.writeFileSync(path.join(__dirname, 'config.json'), JSON.stringify(config, null, 2));
+
+      await interaction.reply({
+        content: `تم إزالة الاستثناء عن <@${userId}>`,
+        ephemeral: true
+      });
+    } else {
+      // إضافة الاستثناء
+      config.exemptUsers.push(userId);
+      fs.writeFileSync(path.join(__dirname, 'config.json'), JSON.stringify(config, null, 2));
+
+      await interaction.reply({
+        content: `تم استثناء <@${userId}> من الطرد التلقائي`,
+        ephemeral: true
+      });
+    }
+  }
+
+  if (commandName === 'addhours') {
+    const targetUser = interaction.options.getUser('user');
+    const hoursToSet = interaction.options.getInteger('hours');
+    const userId = targetUser.id;
+
+    if (!hoursData[userId]) {
+      hoursData[userId] = {
+        totalHours: 0,
+        sessions: []
+      };
+    }
+
+    hoursData[userId].totalHours = hoursToSet;
+    hoursData[userId].sessions.push({
+      date: new Date().toISOString(),
+      hours: hoursToSet,
+      manual: true,
+      set: true
+    });
+    saveHoursData();
+
+    await interaction.reply({
+      content: `تم تحديد ساعات <@${userId}> إلى ${hoursToSet} ساعة`,
+      ephemeral: true
+    });
+  }
+
+  if (commandName === 'increasehours') {
+    const targetUser = interaction.options.getUser('user');
+    const hoursToIncrease = interaction.options.getInteger('hours');
+    const userId = targetUser.id;
+
+    if (!hoursData[userId]) {
+      hoursData[userId] = {
+        totalHours: 0,
+        sessions: []
+      };
+    }
+
+    hoursData[userId].totalHours += hoursToIncrease;
+    hoursData[userId].sessions.push({
+      date: new Date().toISOString(),
+      hours: hoursToIncrease,
+      manual: true
+    });
+    saveHoursData();
+
+    await interaction.reply({
+      content: `تم زيادة ${hoursToIncrease} ساعة لـ <@${userId}>. الإجمالي الآن: ${hoursData[userId].totalHours.toFixed(2)} ساعة`,
+      ephemeral: true
+    });
+  }
+
+  if (commandName === 'weeklyhours') {
+    let weeklyHoursList = '';
+
+    Object.keys(hoursData).forEach(userId => {
+      const weeklyHours = getWeeklyHours(userId);
+      weeklyHoursList += `<@${userId}>: ${weeklyHours.toFixed(2)} ساعة\n`;
+    });
+
+    if (weeklyHoursList === '') {
+      weeklyHoursList = 'لا توجد بيانات ساعات أسبوعية متاحة';
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor('#00ff00')
+      .setTitle('📅 ساعات الأسبوع للجميع')
+      .setDescription(weeklyHoursList)
+      .setFooter({ text: `الأسبوع من ${getWeekStart().toLocaleDateString('ar-SA')}` })
+      .setTimestamp();
+
+    await interaction.reply({
+      embeds: [embed],
+      ephemeral: false
+    });
+  }
 });
 
 // التحقق كل 10 دقائق
@@ -403,12 +632,14 @@ function checkAttendance() {
 
         if (!member) {
           // المستخدم غير موجود في السيرفر
-          attendanceData[userId] = {
-            loggedIn: false,
-            loginTime: null,
-            lastSeen: Date.now()
-          };
-          saveData();
+          // التحقق من أن المستخدم ليس مستثنى
+          if (!config.exemptUsers.includes(userId)) {
+            attendanceData[userId] = {
+              loggedIn: false,
+              loginTime: null,
+              lastSeen: Date.now()
+            };
+            saveData();
 
           if (config.logsChannelId) {
             const logChannel = await guild.channels.fetch(config.logsChannelId).catch(() => null);
