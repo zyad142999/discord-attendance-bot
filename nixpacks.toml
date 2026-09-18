@@ -3,6 +3,3 @@ cmds = ["npm install"]
 
 [phases.start]
 cmd = "node index.js"
-
-[static]
-# من Railway تحديد متغيرات البيئة
