@@ -1,0 +1,530 @@
+const { Client, GatewayIntentBits, SlashCommandBuilder, REST, Routes, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
+const fs = require('fs');
+const path = require('path');
+require('dotenv').config();
+
+// تحميل الإعدادات
+const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
+
+// تحميل البيانات
+let attendanceData = {};
+const dataPath = path.join(__dirname, 'attendance.json');
+
+// تحميل البيانات من الملف
+function loadData() {
+  if (fs.existsSync(dataPath)) {
+    attendanceData = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
+  }
+}
+
+// حفظ البيانات في الملف
+function saveData() {
+  fs.writeFileSync(dataPath, JSON.stringify(attendanceData, null, 2));
+}
+
+// إنشاء العميل
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildPresences,
+    GatewayIntentBits.MessageContent
+  ]
+});
+
+// الأوامر
+const commands = [
+  new SlashCommandBuilder()
+    .setName('login')
+    .setDescription('تسجيل الدخول'),
+  new SlashCommandBuilder()
+    .setName('logout')
+    .setDescription('تسجيل الخروج'),
+  new SlashCommandBuilder()
+    .setName('status')
+    .setDescription('عرض حالة التسجيل'),
+  new SlashCommandBuilder()
+    .setName('panel')
+    .setDescription('عرض لوحة التحكم'),
+  new SlashCommandBuilder()
+    .setName('list')
+    .setDescription('عرض قائمة الحضور')
+].map(command => command.toJSON());
+
+// تسجيل الأوامر
+async function registerCommands() {
+  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+
+  try {
+    console.log('بدء تسجيل الأوامر...');
+
+    const data = await rest.put(
+      Routes.applicationCommands(client.user.id),
+      { body: commands }
+    );
+
+    console.log(`تم تسجيل ${data.length} أمر بنجاح!`);
+  } catch (error) {
+    console.error('خطأ في تسجيل الأوامر:', error);
+  }
+}
+
+// إنشاء Embed للوحة التحكم
+function createAttendancePanel() {
+  const embed = new EmbedBuilder()
+    .setColor(config.panelColor)
+    .setTitle(config.panelTitle)
+    .setDescription(config.panelDescription)
+    .addFields(
+      { name: config.panelFields.login, value: config.panelFields.loginDescription, inline: false },
+      { name: config.panelFields.logout, value: config.panelFields.logoutDescription, inline: false },
+      { name: config.panelFields.status, value: config.panelFields.statusDescription, inline: false },
+      { name: config.panelFields.notes, value: config.panelFields.notesDescription, inline: false }
+    )
+    .setFooter({ text: `نظام تسجيل الحضور - ${new Date().toLocaleDateString('en-US')}` })
+    .setTimestamp();
+
+  const row = new ActionRowBuilder()
+    .addComponents(
+      new ButtonBuilder()
+        .setCustomId('login_button')
+        .setLabel('تسجيل دخول')
+        .setStyle(ButtonStyle.Success)
+        .setEmoji('🟢'),
+      new ButtonBuilder()
+        .setCustomId('logout_button')
+        .setLabel('تسجيل خروج')
+        .setStyle(ButtonStyle.Danger)
+        .setEmoji('🔴'),
+      new ButtonBuilder()
+        .setCustomId('status_button')
+        .setLabel('عرض الحضور')
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji('📋')
+    );
+
+  return { embed, row };
+}
+
+// إنشاء Embed لقائمة الحضور
+function createAttendanceList() {
+  const loggedInUsers = [];
+
+  Object.keys(attendanceData).forEach(userId => {
+    const userData = attendanceData[userId];
+    if (userData && userData.loggedIn) {
+      const sessionDuration = Date.now() - userData.loginTime;
+      const hours = Math.floor(sessionDuration / (1000 * 60 * 60));
+      const minutes = Math.floor((sessionDuration % (1000 * 60 * 60)) / (1000 * 60));
+
+      const loginTime = new Date(userData.loginTime);
+      const timeAgo = getTimeAgo(loginTime);
+
+      loggedInUsers.push({
+        userId,
+        sessionDuration: `${hours}h ${minutes}m`,
+        timeAgo
+      });
+    }
+  });
+
+  if (loggedInUsers.length === 0) {
+    const embed = new EmbedBuilder()
+      .setColor('#00ff00')
+      .setTitle('🟢 الأعضاء الحاليون المتواجدين')
+      .setDescription('لا يوجد أعضاء مسجلين دخول حالياً')
+      .setFooter({ text: `نظام تسجيل الحضور - ${new Date().toLocaleDateString('en-US')} at ${new Date().toLocaleTimeString('en-US')}` })
+      .setTimestamp();
+
+    return { embed };
+  }
+
+  // ترتيب المستخدمين حسب وقت الدخول
+  loggedInUsers.sort((a, b) => {
+    const userA = attendanceData[a.userId].loginTime;
+    const userB = attendanceData[b.userId].loginTime;
+    return userA - userB;
+  });
+
+  // إنشاء قائمة المستخدمين
+  let userList = '';
+  loggedInUsers.forEach((user, index) => {
+    userList += `${index + 1}. <@${user.userId}> - 🟢 ${user.sessionDuration} - منذ ${user.timeAgo}\n`;
+  });
+
+  const embed = new EmbedBuilder()
+    .setColor('#00ff00')
+    .setTitle('🟢 الأعضاء الحاليون المتواجدين')
+    .setDescription(userList)
+    .setFooter({ text: `نظام تسجيل الحضور - ${new Date().toLocaleDateString('en-US')} at ${new Date().toLocaleTimeString('en-US')}` })
+    .setTimestamp();
+
+  return { embed };
+}
+
+// دالة مساعدة لحساب الوقت الماضي
+function getTimeAgo(date) {
+  const seconds = Math.floor((new Date() - date) / 1000);
+
+  const intervals = {
+    'سنة': 31536000,
+    'شهر': 2592000,
+    'أسبوع': 604800,
+    'يوم': 86400,
+    'ساعة': 3600,
+    'دقيقة': 60
+  };
+
+  for (const [unit, secondsInUnit] of Object.entries(intervals)) {
+    const interval = Math.floor(seconds / secondsInUnit);
+    if (interval >= 1) {
+      return `منذ ${interval} ${unit}`;
+    }
+  }
+
+  return 'منذ لحظات';
+}
+
+// التعامل مع الأوامر
+client.on('interactionCreate', async interaction => {
+  // التعامل مع الأزرار
+  if (interaction.isButton()) {
+    const { customId, user, guild } = interaction;
+
+    if (customId === 'login_button') {
+      const userId = user.id;
+
+      if (attendanceData[userId] && attendanceData[userId].loggedIn) {
+        await interaction.reply({
+          content: config.alreadyLoggedInMessage,
+          ephemeral: true
+        });
+        return;
+      }
+
+      attendanceData[userId] = {
+        loggedIn: true,
+        loginTime: Date.now(),
+        lastSeen: Date.now()
+      };
+      saveData();
+
+      await interaction.reply({
+        content: config.loginSuccessMessage,
+        ephemeral: true
+      });
+
+      // إرسال رسالة في قناة اللوج إذا تم تحديدها
+      if (config.logsChannelId) {
+        const logChannel = await guild.channels.fetch(config.logsChannelId).catch(() => null);
+        if (logChannel) {
+          const embed = new EmbedBuilder()
+            .setColor('#00ff00')
+            .setTitle('تسجيل دخول جديد')
+            .setDescription(`المستخدم: ${user.tag}\nالوقت: ${new Date().toLocaleString('ar-SA')}`)
+            .setTimestamp();
+          await logChannel.send({ embeds: [embed] });
+        }
+      }
+    }
+
+    if (customId === 'logout_button') {
+      const userId = user.id;
+
+      if (!attendanceData[userId] || !attendanceData[userId].loggedIn) {
+        await interaction.reply({
+          content: config.notLoggedInMessage,
+          ephemeral: true
+        });
+        return;
+      }
+
+      const sessionDuration = Date.now() - attendanceData[userId].loginTime;
+      const hours = Math.floor(sessionDuration / (1000 * 60 * 60));
+      const minutes = Math.floor((sessionDuration % (1000 * 60 * 60)) / (1000 * 60));
+
+      attendanceData[userId] = {
+        loggedIn: false,
+        loginTime: null,
+        lastSeen: Date.now()
+      };
+      saveData();
+
+      await interaction.reply({
+        content: `${config.logoutSuccessMessage}\nمدة الجلسة: ${hours} ساعة و ${minutes} دقيقة`,
+        ephemeral: true
+      });
+
+      // إرسال رسالة في قناة اللوج إذا تم تحديدها
+      if (config.logsChannelId) {
+        const logChannel = await guild.channels.fetch(config.logsChannelId).catch(() => null);
+        if (logChannel) {
+          const embed = new EmbedBuilder()
+            .setColor('#ff0000')
+            .setTitle('تسجيل خروج')
+            .setDescription(`المستخدم: ${user.tag}\nالوقت: ${new Date().toLocaleString('ar-SA')}\nمدة الجلسة: ${hours} ساعة و ${minutes} دقيقة`)
+            .setTimestamp();
+          await logChannel.send({ embeds: [embed] });
+        }
+      }
+    }
+
+    if (customId === 'status_button') {
+      const { embed } = createAttendanceList();
+      await interaction.reply({
+        embeds: [embed],
+        ephemeral: true
+      });
+    }
+
+    return;
+  }
+
+  // التعامل مع الأوامر النصية
+  if (!interaction.isChatInputCommand()) return;
+
+  const { commandName, user, guild } = interaction;
+
+  if (commandName === 'login') {
+    const userId = user.id;
+
+    if (attendanceData[userId] && attendanceData[userId].loggedIn) {
+      await interaction.reply({
+        content: config.alreadyLoggedInMessage,
+        ephemeral: true
+      });
+      return;
+    }
+
+    attendanceData[userId] = {
+      loggedIn: true,
+      loginTime: Date.now(),
+      lastSeen: Date.now()
+    };
+    saveData();
+
+    await interaction.reply({
+      content: config.loginSuccessMessage,
+      ephemeral: true
+    });
+
+    // إرسال رسالة في قناة اللوج إذا تم تحديدها
+    if (config.logsChannelId) {
+      const logChannel = await guild.channels.fetch(config.logsChannelId).catch(() => null);
+      if (logChannel) {
+        const embed = new EmbedBuilder()
+          .setColor('#00ff00')
+          .setTitle('تسجيل دخول جديد')
+          .setDescription(`المستخدم: ${user.tag}\nالوقت: ${new Date().toLocaleString('ar-SA')}`)
+          .setTimestamp();
+        await logChannel.send({ embeds: [embed] });
+      }
+    }
+  }
+
+  if (commandName === 'logout') {
+    const userId = user.id;
+
+    if (!attendanceData[userId] || !attendanceData[userId].loggedIn) {
+      await interaction.reply({
+        content: config.notLoggedInMessage,
+        ephemeral: true
+      });
+      return;
+    }
+
+    const sessionDuration = Date.now() - attendanceData[userId].loginTime;
+    const hours = Math.floor(sessionDuration / (1000 * 60 * 60));
+    const minutes = Math.floor((sessionDuration % (1000 * 60 * 60)) / (1000 * 60));
+
+    attendanceData[userId] = {
+      loggedIn: false,
+      loginTime: null,
+      lastSeen: Date.now()
+    };
+    saveData();
+
+    await interaction.reply({
+      content: `${config.logoutSuccessMessage}\nمدة الجلسة: ${hours} ساعة و ${minutes} دقيقة`,
+      ephemeral: true
+    });
+
+    // إرسال رسالة في قناة اللوج إذا تم تحديدها
+    if (config.logsChannelId) {
+      const logChannel = await guild.channels.fetch(config.logsChannelId).catch(() => null);
+      if (logChannel) {
+        const embed = new EmbedBuilder()
+          .setColor('#ff0000')
+          .setTitle('تسجيل خروج')
+          .setDescription(`المستخدم: ${user.tag}\nالوقت: ${new Date().toLocaleString('ar-SA')}\nمدة الجلسة: ${hours} ساعة و ${minutes} دقيقة`)
+          .setTimestamp();
+        await logChannel.send({ embeds: [embed] });
+      }
+    }
+  }
+
+  if (commandName === 'status') {
+    const { embed } = createAttendanceList();
+    await interaction.reply({
+      embeds: [embed],
+      ephemeral: true
+    });
+  }
+
+  if (commandName === 'panel') {
+    const { embed, row } = createAttendancePanel();
+    await interaction.reply({
+      embeds: [embed],
+      components: [row]
+    });
+  }
+
+  if (commandName === 'list') {
+    const { embed } = createAttendanceList();
+    await interaction.reply({
+      embeds: [embed],
+      ephemeral: true
+    });
+  }
+});
+
+// التحقق كل 10 دقائق
+function checkAttendance() {
+  const guilds = client.guilds.cache;
+
+  guilds.forEach(async guild => {
+    const members = await guild.members.fetch();
+
+    Object.keys(attendanceData).forEach(async userId => {
+      const userData = attendanceData[userId];
+
+      if (userData && userData.loggedIn) {
+        const member = await members.fetch(userId).catch(() => null);
+
+        if (!member) {
+          // المستخدم غير موجود في السيرفر
+          attendanceData[userId] = {
+            loggedIn: false,
+            loginTime: null,
+            lastSeen: Date.now()
+          };
+          saveData();
+
+          if (config.logsChannelId) {
+            const logChannel = await guild.channels.fetch(config.logsChannelId).catch(() => null);
+            if (logChannel) {
+              const embed = new EmbedBuilder()
+                .setColor('#ff9900')
+                .setTitle('تسجيل خروج تلقائي')
+                .setDescription(`المستخدم: <@${userId}>\nالسبب: غير موجود في السيرفر\nالوقت: ${new Date().toLocaleString('ar-SA')}`)
+                .setTimestamp();
+              await logChannel.send({ embeds: [embed] });
+            }
+          }
+        } else {
+          // تحديث آخر ظهور
+          attendanceData[userId].lastSeen = Date.now();
+          saveData();
+        }
+      }
+    });
+  });
+}
+
+// التحقق من المستخدمين الذين لم يكونوا موجودين لمدة ساعتين
+function checkInactiveUsers() {
+  const now = Date.now();
+  const timeoutMs = config.timeoutMinutes * 60 * 1000;
+
+  Object.keys(attendanceData).forEach(userId => {
+    const userData = attendanceData[userId];
+
+    if (userData && userData.loggedIn) {
+      const timeSinceLastSeen = now - userData.lastSeen;
+
+      if (timeSinceLastSeen > timeoutMs) {
+        // تسجيل خروج تلقائي
+        attendanceData[userId] = {
+          loggedIn: false,
+          loginTime: null,
+          lastSeen: Date.now()
+        };
+        saveData();
+
+        // إرسال رسالة للمستخدم
+        const user = client.users.fetch(userId).catch(() => null);
+        if (user) {
+          user.then(u => u.send(config.timeoutMessage).catch(() => {}));
+        }
+
+        // إرسال رسالة في قناة اللوج
+        if (config.logsChannelId) {
+          const guilds = client.guilds.cache;
+          guilds.forEach(async guild => {
+            const logChannel = await guild.channels.fetch(config.logsChannelId).catch(() => null);
+            if (logChannel) {
+              const embed = new EmbedBuilder()
+                .setColor('#ff6600')
+                .setTitle('تسجيل خروج تلقائي - انتهاء الوقت')
+                .setDescription(`المستخدم: <@${userId}>\nالسبب: عدم وجوده لمدة ساعتين\nالوقت: ${new Date().toLocaleString('ar-SA')}`)
+                .setTimestamp();
+              await logChannel.send({ embeds: [embed] });
+            }
+          });
+        }
+      }
+    }
+  });
+}
+
+// بدء التحقق الدوري
+function startPeriodicChecks() {
+  // التحقق كل 10 دقائق
+  setInterval(() => {
+    console.log('جاري التحقق من الحضور...');
+    checkAttendance();
+    checkInactiveUsers();
+  }, config.checkInterval * 60 * 1000);
+}
+
+// إرسال اللوحة تلقائياً إلى القناة المحددة
+async function sendPanelToChannel() {
+  if (!config.panelChannelId) {
+    console.log('لم يتم تحديد قناة للوحة في config.json');
+    return;
+  }
+
+  try {
+    const channel = await client.channels.fetch(config.panelChannelId);
+    if (!channel) {
+      console.log('القناة المحددة غير موجودة');
+      return;
+    }
+
+    const { embed, row } = createAttendancePanel();
+    await channel.send({
+      embeds: [embed],
+      components: [row]
+    });
+
+    console.log(`تم إرسال اللوحة إلى القناة ${config.panelChannelId}`);
+  } catch (error) {
+    console.error('خطأ في إرسال اللوحة:', error);
+  }
+}
+
+// عند جاهزية البوت
+client.once('ready', () => {
+  console.log(`تم تسجيل الدخول كـ ${client.user.tag}!`);
+  loadData();
+  registerCommands();
+  startPeriodicChecks();
+
+  // إرسال اللوحة تلقائياً بعد ثواني قليلة
+  setTimeout(() => {
+    sendPanelToChannel();
+  }, 3000);
+});
+
+// تشغيل البوت
+client.login(process.env.DISCORD_TOKEN);

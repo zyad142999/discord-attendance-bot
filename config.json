@@ -1,0 +1,26 @@
+{
+  "checkInterval": 10,
+  "timeoutMinutes": 120,
+  "logsChannelId": "1533710523202273362",
+  "panelChannelId": "1530787441588572351",
+  "adminRoles": [],
+  "panelTitle": "🛡️ مرحباً بك في نظام تسجيل الحضور لأعضاء العصابة!",
+  "panelDescription": "استخدم الأزرار أدناه لإدارة حضورك",
+  "panelFields": {
+    "login": "🔴 تسجيل الدخول",
+    "loginDescription": "اضغط على زر تسجيل الدخول لبدء تسجيل حضورك",
+    "logout": "🔴 تسجيل الخروج",
+    "logoutDescription": "اضغط على زر تسجيل الخروج لإنهاء جلستك",
+    "status": "📋 عرض الحضور",
+    "statusDescription": "اضغط على زر عرض الحضور لرؤية حالتك الحالية",
+    "notes": "⚠️ ملاحظات",
+    "notesDescription": "يجب أن تكون متواجداً في السيرفر لتسجيل الحضور. سيتم تسجيل خروجك تلقائياً بعد ساعتين من عدم التواجد."
+  },
+  "panelColor": "#ff0000",
+  "welcomeMessage": "مرحباً بك! استخدم الأوامر التالية:\n- /login - لتسجيل الدخول\n- /logout - لتسجيل الخروج",
+  "loginSuccessMessage": "تم تسجيل الدخول بنجاح! ✅",
+  "logoutSuccessMessage": "تم تسجيل الخروج بنجاح! ✅",
+  "alreadyLoggedInMessage": "أنت مسجل دخول بالفعل! 🚫",
+  "notLoggedInMessage": "أنت غير مسجل دخول! 🚫",
+  "timeoutMessage": "تم تسجيل خروجك تلقائياً لعدم وجودك في السيرفر لمدة ساعتين ⏰"
+}

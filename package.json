@@ -1,0 +1,21 @@
+{
+  "name": "discord-attendance-bot",
+  "version": "1.0.0",
+  "description": "Discord bot for attendance tracking with automatic timeout",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "attendance"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "discord.js": "^14.14.1",
+    "dotenv": "^18.0.0"
+  }
+}
