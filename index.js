@@ -641,15 +641,16 @@ function checkAttendance() {
             };
             saveData();
 
-          if (config.logsChannelId) {
-            const logChannel = await guild.channels.fetch(config.logsChannelId).catch(() => null);
-            if (logChannel) {
-              const embed = new EmbedBuilder()
-                .setColor('#ff9900')
-                .setTitle('تسجيل خروج تلقائي')
-                .setDescription(`المستخدم: <@${userId}>\nالسبب: غير موجود في السيرفر\nالوقت: ${new Date().toLocaleString('ar-SA')}`)
-                .setTimestamp();
-              await logChannel.send({ embeds: [embed] });
+            if (config.logsChannelId) {
+              const logChannel = await guild.channels.fetch(config.logsChannelId).catch(() => null);
+              if (logChannel) {
+                const embed = new EmbedBuilder()
+                  .setColor('#ff9900')
+                  .setTitle('تسجيل خروج تلقائي')
+                  .setDescription(`المستخدم: <@${userId}>\nالسبب: غير موجود في السيرفر\nالوقت: ${new Date().toLocaleString('ar-SA')}`)
+                  .setTimestamp();
+                await logChannel.send({ embeds: [embed] });
+              }
             }
           }
         } else {
